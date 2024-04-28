@@ -1,18 +1,17 @@
 package us.maxpowa.apc;
 
 import com.simibubi.create.content.logistics.filter.ItemAttribute;
-import dev.shadowsoffire.apotheosis.adventure.affix.Affix;
-import dev.shadowsoffire.apotheosis.adventure.affix.AffixHelper;
-import dev.shadowsoffire.apotheosis.adventure.affix.AffixInstance;
-import dev.shadowsoffire.apotheosis.adventure.affix.AffixRegistry;
-import dev.shadowsoffire.apotheosis.adventure.loot.LootRarity;
-import dev.shadowsoffire.apotheosis.adventure.loot.RarityRegistry;
-import dev.shadowsoffire.placebo.reload.DynamicHolder;
+import shadows.apotheosis.adventure.affix.Affix;
+import shadows.apotheosis.adventure.affix.AffixHelper;
+import shadows.apotheosis.adventure.affix.AffixInstance;
+import shadows.apotheosis.adventure.affix.AffixManager;
+import shadows.apotheosis.adventure.loot.LootRarity;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.common.Mod;
+import shadows.apotheosis.adventure.loot.LootRarityManager;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -32,17 +31,34 @@ public class ApotheoticCreation
 
         @Override
         public boolean appliesTo(ItemStack stack) {
-            DynamicHolder<LootRarity> itemRarity = AffixHelper.getRarity(stack);
-            return itemRarity.isBound();
+            if (stack.hasTag()) {
+                assert stack.getTag() != null;
+                LootRarity itemRarity;
+                if (stack.getTag().contains("rarity")) {
+                    itemRarity = LootRarity.byId(stack.getTag().getString("rarity"));
+                } else {
+                    itemRarity = AffixHelper.getRarity(stack);
+                }
+                return itemRarity != null;
+            }
+            return false;
         }
 
         @Override
         public List<ItemAttribute> listAttributesOf(ItemStack stack) {
-            DynamicHolder<LootRarity> itemRarity = AffixHelper.getRarity(stack);
+            LootRarity itemRarity = null;
+            if (stack.hasTag()) {
+                assert stack.getTag() != null;
+                if (stack.getTag().contains("rarity")) {
+                    itemRarity = LootRarity.byId(stack.getTag().getString("rarity"));
+                } else {
+                    itemRarity = AffixHelper.getRarity(stack);
+                }
+            }
 
             List<ItemAttribute> list = new ArrayList<>();
-            if (itemRarity.isBound()) {
-                list.add(new RarityAttribute(itemRarity.get()));
+            if (itemRarity != null) {
+                list.add(new RarityAttribute(itemRarity));
             }
             return list;
 
@@ -65,15 +81,18 @@ public class ApotheoticCreation
 
         @Override
         public void writeNBT(CompoundTag nbt) {
-            nbt.putInt("rarity", this.rarity.ordinal());
+            if (this.rarity != null) {
+                nbt.putInt("rarity", this.rarity.ordinal());
+            }
         }
 
         @Override
         public ItemAttribute readNBT(CompoundTag nbt) {
             if (nbt.contains("rarity")) {
-                DynamicHolder<LootRarity> rarity = RarityRegistry.byOrdinal(nbt.getInt("rarity"));
-                if (rarity.isBound())
-                    return new RarityAttribute(rarity.get());
+                if( LootRarity.LIST.size() >= nbt.getInt("rarity")) {
+                    LootRarity rarity = LootRarity.LIST.get(nbt.getInt("rarity"));
+                    return new RarityAttribute(rarity);
+                }
             }
             return new RarityAttribute(null);
         }
@@ -83,21 +102,21 @@ public class ApotheoticCreation
 
         private static final Set<String> HIDDEN_AFFIXES = Set.of("socket", "durable");
 
-        private final DynamicHolder<? extends Affix> affix;
+        private final Affix affix;
 
-        public AffixAttribute(DynamicHolder<? extends Affix> affix) {
+        public AffixAttribute(Affix affix) {
             this.affix = affix;
         }
 
         @Override
         public boolean appliesTo(ItemStack stack) {
-            Map<DynamicHolder<? extends Affix>, AffixInstance> affixes = AffixHelper.getAffixes(stack);
+            Map<Affix, AffixInstance> affixes = AffixHelper.getAffixes(stack);
             return affixes.containsKey(affix);
         }
 
         @Override
         public List<ItemAttribute> listAttributesOf(ItemStack stack) {
-            Map<DynamicHolder<? extends Affix>, AffixInstance> affixes = AffixHelper.getAffixes(stack);
+            Map<Affix, AffixInstance> affixes = AffixHelper.getAffixes(stack);
 
             return affixes.keySet().stream().filter((affix) -> !HIDDEN_AFFIXES.contains(affix.getId().getPath())).map(AffixAttribute::new).collect(Collectors.toList());
         }
@@ -119,9 +138,11 @@ public class ApotheoticCreation
 
         @Override
         public void writeNBT(CompoundTag nbt) {
-            ResourceLocation loc = this.affix.getId();
-            nbt.putString("affix_namespace", loc.getNamespace());
-            nbt.putString("affix_path", loc.getPath());
+            if (this.affix != null) {
+                ResourceLocation loc = this.affix.getId();
+                nbt.putString("affix_namespace", loc.getNamespace());
+                nbt.putString("affix_path", loc.getPath());
+            }
         }
 
         @Override
@@ -130,8 +151,8 @@ public class ApotheoticCreation
                 String namespace = nbt.getString("affix_namespace");
                 String path = nbt.getString("affix_path");
                 ResourceLocation loc = new ResourceLocation(namespace, path);
-                DynamicHolder<? extends Affix> affix = AffixRegistry.INSTANCE.holder(loc);
-                if (affix.isBound()) return new AffixAttribute(affix);
+                Affix affix = AffixManager.INSTANCE.getOrDefault(loc, null);
+                if (affix != null) return new AffixAttribute(affix);
             }
             return new AffixAttribute(null);
         }
