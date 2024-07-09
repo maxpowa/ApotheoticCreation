@@ -33,7 +33,8 @@ public class ApotheoticCreation
         @Override
         public boolean appliesTo(ItemStack stack) {
             DynamicHolder<LootRarity> itemRarity = AffixHelper.getRarity(stack);
-            return itemRarity.isBound();
+            if (!itemRarity.isBound()) return false;
+            return itemRarity.get() == this.rarity;
         }
 
         @Override
