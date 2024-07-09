@@ -11,7 +11,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.common.Mod;
-import shadows.apotheosis.adventure.loot.LootRarityManager;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -39,7 +38,7 @@ public class ApotheoticCreation
                 } else {
                     itemRarity = AffixHelper.getRarity(stack);
                 }
-                return itemRarity != null;
+                return itemRarity == this.rarity;
             }
             return false;
         }
