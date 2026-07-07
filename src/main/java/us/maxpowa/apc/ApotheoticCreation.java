@@ -1,6 +1,8 @@
 package us.maxpowa.apc;
 
-import com.simibubi.create.content.logistics.filter.ItemAttribute;
+import com.simibubi.create.api.registry.CreateBuiltInRegistries;
+import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttribute;
+import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttributeType;
 import dev.shadowsoffire.apotheosis.adventure.affix.Affix;
 import dev.shadowsoffire.apotheosis.adventure.affix.AffixHelper;
 import dev.shadowsoffire.apotheosis.adventure.affix.AffixInstance;
@@ -12,41 +14,50 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.registries.RegisterEvent;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 import java.util.stream.Collectors;
 
-@Mod("apotheoticcreation")
+@Mod(ApotheoticCreation.MOD_ID)
 public class ApotheoticCreation
 {
-    static ItemAttribute rarityAttribute = ItemAttribute.register(new RarityAttribute(null));
-    static ItemAttribute affixAttribute = ItemAttribute.register(new AffixAttribute(null));
+    public static final String MOD_ID = "apotheoticcreation";
+    @SuppressWarnings("removal")
+    static final ResourceLocation RARITY_ID = new ResourceLocation(MOD_ID, "rarity");
+    @SuppressWarnings("removal")
+    static final ResourceLocation AFFIX_ID = new ResourceLocation(MOD_ID, "affix");
+
+    public ApotheoticCreation() {
+        //noinspection removal
+        FMLJavaModLoadingContext.get().getModEventBus().addListener(this::registerHandler);
+    }
+
+    private void registerHandler(final RegisterEvent event) {
+        var attributeRegistryKey = CreateBuiltInRegistries.ITEM_ATTRIBUTE_TYPE.key();
+
+        if (event.getRegistryKey() == attributeRegistryKey) {
+            event.register(attributeRegistryKey, RARITY_ID, RarityAttribute.Type::new);
+            event.register(attributeRegistryKey, AFFIX_ID, AffixAttribute.Type::new);
+        }
+    }
 
     public static class RarityAttribute implements ItemAttribute {
+        private LootRarity rarity;
 
-        private final LootRarity rarity;
         public RarityAttribute(LootRarity rarity) {
             this.rarity = rarity;
         }
 
         @Override
-        public boolean appliesTo(ItemStack stack) {
+        public boolean appliesTo(ItemStack stack, Level level) {
             DynamicHolder<LootRarity> itemRarity = AffixHelper.getRarity(stack);
             if (!itemRarity.isBound()) return false;
             return itemRarity.get() == this.rarity;
-        }
-
-        @Override
-        public List<ItemAttribute> listAttributesOf(ItemStack stack) {
-            DynamicHolder<LootRarity> itemRarity = AffixHelper.getRarity(stack);
-
-            List<ItemAttribute> list = new ArrayList<>();
-            if (itemRarity.isBound()) {
-                list.add(new RarityAttribute(itemRarity.get()));
-            }
-            return list;
-
         }
 
         @Override
@@ -65,18 +76,51 @@ public class ApotheoticCreation
         }
 
         @Override
-        public void writeNBT(CompoundTag nbt) {
-            nbt.putInt("rarity", this.rarity.ordinal());
+        public void save(CompoundTag nbt) {
+            if (this.rarity != null) {
+                nbt.putInt("rarity", this.rarity.ordinal());
+            }
         }
 
         @Override
-        public ItemAttribute readNBT(CompoundTag nbt) {
+        public void load(CompoundTag nbt) {
             if (nbt.contains("rarity")) {
                 DynamicHolder<LootRarity> rarity = RarityRegistry.byOrdinal(nbt.getInt("rarity"));
                 if (rarity.isBound())
-                    return new RarityAttribute(rarity.get());
+                    this.rarity = rarity.get();
             }
-            return new RarityAttribute(null);
+        }
+
+        @Override
+        public ItemAttributeType getType() {
+            return CreateBuiltInRegistries.ITEM_ATTRIBUTE_TYPE.get(RARITY_ID);
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof RarityAttribute other)) return false;
+            return Objects.equals(this.rarity, other.rarity);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(this.rarity);
+        }
+
+        public static class Type implements ItemAttributeType {
+            @Override
+            public @NotNull ItemAttribute createAttribute() {
+                return new RarityAttribute(null);
+            }
+
+            @Override
+            public List<ItemAttribute> getAllAttributes(ItemStack stack, Level level) {
+                DynamicHolder<LootRarity> itemRarity = AffixHelper.getRarity(stack);
+                if (!itemRarity.isBound()) return Collections.emptyList();
+                LootRarity rarity = itemRarity.get();
+                return List.of(new RarityAttribute(rarity));
+            }
         }
     }
 
@@ -84,23 +128,16 @@ public class ApotheoticCreation
 
         private static final Set<String> HIDDEN_AFFIXES = Set.of("socket", "durable");
 
-        private final DynamicHolder<? extends Affix> affix;
+        private DynamicHolder<? extends Affix> affix;
 
         public AffixAttribute(DynamicHolder<? extends Affix> affix) {
             this.affix = affix;
         }
 
         @Override
-        public boolean appliesTo(ItemStack stack) {
+        public boolean appliesTo(ItemStack stack, Level level) {
             Map<DynamicHolder<? extends Affix>, AffixInstance> affixes = AffixHelper.getAffixes(stack);
             return affixes.containsKey(affix);
-        }
-
-        @Override
-        public List<ItemAttribute> listAttributesOf(ItemStack stack) {
-            Map<DynamicHolder<? extends Affix>, AffixInstance> affixes = AffixHelper.getAffixes(stack);
-
-            return affixes.keySet().stream().filter((affix) -> !HIDDEN_AFFIXES.contains(affix.getId().getPath())).map(AffixAttribute::new).collect(Collectors.toList());
         }
 
         @Override
@@ -119,22 +156,54 @@ public class ApotheoticCreation
         }
 
         @Override
-        public void writeNBT(CompoundTag nbt) {
+        public void save(CompoundTag nbt) {
             ResourceLocation loc = this.affix.getId();
             nbt.putString("affix_namespace", loc.getNamespace());
             nbt.putString("affix_path", loc.getPath());
         }
 
         @Override
-        public ItemAttribute readNBT(CompoundTag nbt) {
+        public void load(CompoundTag nbt) {
             if (nbt.contains("affix_namespace") && nbt.contains("affix_path")) {
                 String namespace = nbt.getString("affix_namespace");
                 String path = nbt.getString("affix_path");
-                ResourceLocation loc = new ResourceLocation(namespace, path);
+                @SuppressWarnings("removal") ResourceLocation loc = new ResourceLocation(namespace, path);
                 DynamicHolder<? extends Affix> affix = AffixRegistry.INSTANCE.holder(loc);
-                if (affix.isBound()) return new AffixAttribute(affix);
+                if (affix.isBound()) {
+                    this.affix = affix;
+                }
             }
-            return new AffixAttribute(null);
+        }
+
+        @Override
+        public ItemAttributeType getType() {
+            return CreateBuiltInRegistries.ITEM_ATTRIBUTE_TYPE.get(AFFIX_ID);
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof AffixAttribute other)) return false;
+            return Objects.equals(this.affix, other.affix);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(this.affix);
+        }
+
+        public static class Type implements ItemAttributeType {
+            @Override
+            public @NotNull ItemAttribute createAttribute() {
+                return new AffixAttribute(null);
+            }
+            @Override
+            public List<ItemAttribute> getAllAttributes(ItemStack stack, Level level) {
+                return AffixHelper.getAffixes(stack).keySet().parallelStream()
+                    .filter(entry -> entry.isBound() && !HIDDEN_AFFIXES.contains(entry.getId().getPath()))
+                    .map(AffixAttribute::new)
+                    .collect(Collectors.toList());
+            }
         }
     }
 
