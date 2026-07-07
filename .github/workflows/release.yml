@@ -21,12 +21,11 @@ jobs:
         uses: gradle/gradle-build-action@bc72ac9e9d33a38827c042af2d90014ad4250535
       - name: Execute Gradle build
         run: ./gradlew build
-      - uses: Kir-Antipov/mc-publish@45765a374ec0602f500df35a9aecbbbf799fb26d
+      - uses: apehum/mc-publish@3f1b0f67f1f38d310414d2431f9da7c4a922261b
         with:
           modrinth-id: apotheoticcreation
           modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
           curseforge-id: 956637
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          game-versions: |
-            >=1.20
+          game-versions: 1.20.1
