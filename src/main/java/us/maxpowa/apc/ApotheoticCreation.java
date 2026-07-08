@@ -1,23 +1,26 @@
 package us.maxpowa.apc;
 
+import com.mojang.serialization.MapCodec;
 import com.simibubi.create.api.registry.CreateBuiltInRegistries;
 import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttribute;
 import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttributeType;
-import dev.shadowsoffire.apotheosis.adventure.affix.Affix;
-import dev.shadowsoffire.apotheosis.adventure.affix.AffixHelper;
-import dev.shadowsoffire.apotheosis.adventure.affix.AffixInstance;
-import dev.shadowsoffire.apotheosis.adventure.affix.AffixRegistry;
-import dev.shadowsoffire.apotheosis.adventure.loot.LootRarity;
-import dev.shadowsoffire.apotheosis.adventure.loot.RarityRegistry;
+import dev.shadowsoffire.apotheosis.affix.Affix;
+import dev.shadowsoffire.apotheosis.affix.AffixHelper;
+import dev.shadowsoffire.apotheosis.affix.AffixInstance;
+import dev.shadowsoffire.apotheosis.affix.AffixRegistry;
+import dev.shadowsoffire.apotheosis.loot.LootRarity;
+import dev.shadowsoffire.apotheosis.loot.RarityRegistry;
 import dev.shadowsoffire.placebo.reload.DynamicHolder;
-import net.minecraft.nbt.CompoundTag;
+import io.netty.buffer.ByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.registries.RegisterEvent;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.neoforge.registries.RegisterEvent;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -27,14 +30,11 @@ import java.util.stream.Collectors;
 public class ApotheoticCreation
 {
     public static final String MOD_ID = "apotheoticcreation";
-    @SuppressWarnings("removal")
-    static final ResourceLocation RARITY_ID = new ResourceLocation(MOD_ID, "rarity");
-    @SuppressWarnings("removal")
-    static final ResourceLocation AFFIX_ID = new ResourceLocation(MOD_ID, "affix");
+    static final ResourceLocation RARITY_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "rarity");
+    static final ResourceLocation AFFIX_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "affix");
 
-    public ApotheoticCreation() {
-        //noinspection removal
-        FMLJavaModLoadingContext.get().getModEventBus().addListener(this::registerHandler);
+    public ApotheoticCreation(IEventBus modEventBus) {
+        modEventBus.addListener(this::registerHandler);
     }
 
     private void registerHandler(final RegisterEvent event) {
@@ -47,7 +47,12 @@ public class ApotheoticCreation
     }
 
     public static class RarityAttribute implements ItemAttribute {
-        private LootRarity rarity;
+        public static final MapCodec<RarityAttribute> CODEC = LootRarity.CODEC.fieldOf("rarity")
+                .xmap(RarityAttribute::new, attr -> attr.rarity);
+        public static final StreamCodec<ByteBuf, RarityAttribute> STREAM_CODEC = RarityRegistry.INSTANCE.holderStreamCodec()
+                .map(holder -> new RarityAttribute(holder.get()), attr -> RarityRegistry.INSTANCE.holder(attr.rarity));
+
+        private final LootRarity rarity;
 
         public RarityAttribute(LootRarity rarity) {
             this.rarity = rarity;
@@ -73,22 +78,6 @@ public class ApotheoticCreation
                 };
             }
             return new Object[]{};
-        }
-
-        @Override
-        public void save(CompoundTag nbt) {
-            if (this.rarity != null) {
-                nbt.putInt("rarity", this.rarity.ordinal());
-            }
-        }
-
-        @Override
-        public void load(CompoundTag nbt) {
-            if (nbt.contains("rarity")) {
-                DynamicHolder<LootRarity> rarity = RarityRegistry.byOrdinal(nbt.getInt("rarity"));
-                if (rarity.isBound())
-                    this.rarity = rarity.get();
-            }
         }
 
         @Override
@@ -121,22 +110,37 @@ public class ApotheoticCreation
                 LootRarity rarity = itemRarity.get();
                 return List.of(new RarityAttribute(rarity));
             }
+
+            @Override
+            public MapCodec<? extends ItemAttribute> codec() {
+                return RarityAttribute.CODEC;
+            }
+
+            @Override
+            public StreamCodec<? super RegistryFriendlyByteBuf, ? extends ItemAttribute> streamCodec() {
+                return RarityAttribute.STREAM_CODEC;
+            }
         }
     }
 
     public static class AffixAttribute implements ItemAttribute {
 
+        public static final MapCodec<AffixAttribute> CODEC = AffixRegistry.INSTANCE.holderCodec().fieldOf("affix")
+                .xmap(AffixAttribute::new, attr -> attr.affix);
+        public static final StreamCodec<ByteBuf, AffixAttribute> STREAM_CODEC = AffixRegistry.INSTANCE.holderStreamCodec()
+                .map(AffixAttribute::new, attr -> attr.affix);
+
         private static final Set<String> HIDDEN_AFFIXES = Set.of("socket", "durable");
 
-        private DynamicHolder<? extends Affix> affix;
+        private final DynamicHolder<Affix> affix;
 
-        public AffixAttribute(DynamicHolder<? extends Affix> affix) {
+        public AffixAttribute(DynamicHolder<Affix> affix) {
             this.affix = affix;
         }
 
         @Override
         public boolean appliesTo(ItemStack stack, Level level) {
-            Map<DynamicHolder<? extends Affix>, AffixInstance> affixes = AffixHelper.getAffixes(stack);
+            Map<DynamicHolder<Affix>, AffixInstance> affixes = AffixHelper.getAffixes(stack);
             return affixes.containsKey(affix);
         }
 
@@ -153,26 +157,6 @@ public class ApotheoticCreation
                 };
             }
             return new Object[]{};
-        }
-
-        @Override
-        public void save(CompoundTag nbt) {
-            ResourceLocation loc = this.affix.getId();
-            nbt.putString("affix_namespace", loc.getNamespace());
-            nbt.putString("affix_path", loc.getPath());
-        }
-
-        @Override
-        public void load(CompoundTag nbt) {
-            if (nbt.contains("affix_namespace") && nbt.contains("affix_path")) {
-                String namespace = nbt.getString("affix_namespace");
-                String path = nbt.getString("affix_path");
-                @SuppressWarnings("removal") ResourceLocation loc = new ResourceLocation(namespace, path);
-                DynamicHolder<? extends Affix> affix = AffixRegistry.INSTANCE.holder(loc);
-                if (affix.isBound()) {
-                    this.affix = affix;
-                }
-            }
         }
 
         @Override
@@ -197,12 +181,23 @@ public class ApotheoticCreation
             public @NotNull ItemAttribute createAttribute() {
                 return new AffixAttribute(null);
             }
+
             @Override
             public List<ItemAttribute> getAllAttributes(ItemStack stack, Level level) {
                 return AffixHelper.getAffixes(stack).keySet().parallelStream()
                     .filter(entry -> entry.isBound() && !HIDDEN_AFFIXES.contains(entry.getId().getPath()))
                     .map(AffixAttribute::new)
                     .collect(Collectors.toList());
+            }
+
+            @Override
+            public MapCodec<? extends ItemAttribute> codec() {
+                return AffixAttribute.CODEC;
+            }
+
+            @Override
+            public StreamCodec<? super RegistryFriendlyByteBuf, ? extends ItemAttribute> streamCodec() {
+                return AffixAttribute.STREAM_CODEC;
             }
         }
     }
